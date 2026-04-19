@@ -23,8 +23,9 @@ output "storageAccountID" {
 }
 
 output "storageAccountKey" {
-  description = " Access Key to access the SA."
+  description = "Access key for the storage account. Treat as a secret."
   value       = azurerm_storage_account.genericSA.primary_access_key
+  sensitive   = true
 }
 
 output "adlsFyleSytemID" {

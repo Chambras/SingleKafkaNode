@@ -17,7 +17,7 @@ variable "rgName" {
 }
 
 variable "tags" {
-  type = map
+  type = map(any)
   default = {
     "Environment" = "Dev"
     "Project"     = "BTS-SWIM"
@@ -44,13 +44,13 @@ locals {
 }
 
 variable "baseCIDRBlock" {
-  type        = list
+  type        = list(any)
   default     = ["10.70.0.0/16"]
   description = "Main VNet CIDR value range."
 }
 
 variable "subnets" {
-  type = map
+  type = map(any)
   default = {
     "workers"    = "1"
     "zookeeper"  = "2"
@@ -61,7 +61,7 @@ variable "subnets" {
 }
 
 variable "dataBricksSubnets" {
-  type = map
+  type = map(any)
   default = {
     "publicDB"  = "5"
     "privateDB" = "6"
@@ -77,9 +77,9 @@ variable "sgName" {
 }
 
 variable "sourceIPs" {
-  type        = list
-  default     = [""]
-  description = "Public IPs to allow inboud communications."
+  type        = list(string)
+  default     = ["74.96.174.80"]
+  description = "Public IPs allowed to reach admin ports (SSH, HTTP) on the Kafka VM. Override per environment."
 }
 
 variable "workspaceName" {

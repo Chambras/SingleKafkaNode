@@ -23,6 +23,11 @@ resource "azurerm_network_interface" "kafkaNIC" {
   tags = var.tags
 }
 
+resource "azurerm_network_interface_security_group_association" "kafkaNICNSG" {
+  network_interface_id      = azurerm_network_interface.kafkaNIC.id
+  network_security_group_id = azurerm_network_security_group.genericNSG.id
+}
+
 resource "azurerm_virtual_machine" "kafkaServer" {
   name                  = "${var.suffix}-KafkaServer"
   location              = azurerm_resource_group.genericRG.location
