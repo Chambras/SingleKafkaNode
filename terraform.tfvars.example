@@ -1,0 +1,29 @@
+# Copy to terraform.tfvars and adjust for your environment.
+# Variables listed here are the most important to review before running `terraform apply`.
+
+# Azure region and naming
+location = "eastus2"
+suffix   = "bts"
+rgName   = "SingleNodeRG"
+
+# Must be globally unique, 3-24 chars, lowercase letters and numbers only.
+# An ADLS Gen2 account is also created as "<storageAccountName>adsl".
+storageAccountName = "btsclstrdataingested"
+
+# Public IPs allowed to SSH/HTTP into the Kafka VM. Restrict to operator IPs.
+sourceIPs = ["74.96.174.80"]
+
+# Absolute path is safest. '~' is expanded automatically.
+sshKeyPath = "~/.ssh/vm_ssh.pub"
+vmUserName = "kafkaAdmin"
+
+# Databricks workspace name (appended to suffix).
+workspaceName = "DBWokspaceSingleNode"
+
+# Optional: tags applied to all resources.
+# tags = {
+#   Environment = "Dev"
+#   Project     = "BTS-SWIM"
+#   BillingCode = "Internal"
+#   Customer    = "DOT"
+# }

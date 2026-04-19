@@ -1,19 +1,19 @@
 variable "location" {
   type        = string
   default     = "eastus2"
-  description = "Location where the resoruces are going to be created."
+  description = "Azure region where resources are created."
 }
 
 variable "suffix" {
   type        = string
   default     = "bts"
-  description = "To be added at the beginning of each resource."
+  description = "Prefix/suffix added to resource names for identification."
 }
 
 variable "rgName" {
   type        = string
   default     = "SingleNodeRG"
-  description = "Resource Group Name."
+  description = "Resource Group name (appended to var.suffix)."
 }
 
 variable "tags" {
@@ -24,29 +24,18 @@ variable "tags" {
     "BillingCode" = "Internal"
     "Customer"    = "DOT"
   }
+  description = "Tags applied to all resources."
 }
 
 ## Networking variables
-variable "routeTableName" {
-  type        = string
-  default     = "Main"
-  description = "Route table name."
-}
-
 variable "vnetName" {
   type        = string
   default     = "Main"
-  description = "VNet name."
+  description = "VNet name (appended to var.suffix)."
 }
 
 locals {
   base_cidr_block = "10.70.0.0/16"
-}
-
-variable "baseCIDRBlock" {
-  type        = list(any)
-  default     = ["10.70.0.0/16"]
-  description = "Main VNet CIDR value range."
 }
 
 variable "subnets" {
@@ -57,7 +46,7 @@ variable "subnets" {
     "headnodes"  = "3"
     "management" = "4"
   }
-  description = "Subnets to be created in the VNet"
+  description = "Kafka-side subnets to create in the VNet. Values are the /24 octet index within base_cidr_block."
 }
 
 variable "dataBricksSubnets" {
@@ -66,44 +55,38 @@ variable "dataBricksSubnets" {
     "publicDB"  = "5"
     "privateDB" = "6"
   }
-  description = " DataBricks dedicated subnets for VNet injection."
+  description = "Databricks dedicated subnets for VNet injection."
 }
 
 ## Security variables
-variable "sgName" {
-  type        = string
-  default     = "default_RDPSSH_SG"
-  description = "Default Security Group Name to be applied by default to VMs and subnets."
-}
-
 variable "sourceIPs" {
   type        = list(string)
   default     = ["74.96.174.80"]
-  description = "Public IPs allowed to reach admin ports (SSH, HTTP) on the Kafka VM. Override per environment."
+  description = "Public IPs allowed to reach admin ports (SSH, HTTP) on the Kafka VM. MUST be overridden per environment."
 }
 
 variable "workspaceName" {
   type        = string
   default     = "DBWokspaceSingleNode"
-  description = "DataBricks Workspace name."
+  description = "Databricks Workspace name (appended to var.suffix)."
 }
 
 ## Storage
 variable "storageAccountName" {
   type        = string
   default     = "btsclstrdataingested"
-  description = "BTS Cluster Storage Account."
+  description = "Storage account name. MUST be globally unique, 3-24 chars, lowercase letters and numbers only. An ADLS Gen2 account is also created with the suffix 'adsl'."
 }
 
 ## VM
 variable "vmUserName" {
   type        = string
   default     = "kafkaAdmin"
-  description = "Username to be added to the VM."
+  description = "Admin username created on the Kafka VM."
 }
 
 variable "sshKeyPath" {
   type        = string
   default     = "~/.ssh/vm_ssh.pub"
-  description = "SSH Key to use when creating the VM."
+  description = "Path to the SSH public key injected into the VM. Supports '~' expansion."
 }
