@@ -1,0 +1,14 @@
+[Unit]
+Description=zookeeper
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User={{ kafka_user }}
+Group={{ kafka_user }}
+ExecStart={{ kafka_home }}/bin/zookeeper-server-start.sh {{ kafka_home }}/config/zookeeper.properties
+ExecStop={{ kafka_home }}/bin/zookeeper-server-stop.sh
+
+[Install]
+WantedBy=multi-user.target
+

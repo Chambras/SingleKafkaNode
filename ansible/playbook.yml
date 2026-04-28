@@ -1,0 +1,7 @@
+---
+- name: Configure single-node Kafka
+  hosts: kafka
+  become: true
+  roles:
+    - kafka
+

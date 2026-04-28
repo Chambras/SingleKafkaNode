@@ -1,0 +1,97 @@
+---
+- name: Ensure Kafka user exists
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ kafka_user }}"
+
+- name: Install packages required by Kafka and this tutorial
+  ansible.builtin.package:
+    name:
+      - httpd
+      - "{{ kafka_java_package }}"
+      - tmux
+      - git
+      - wget
+      - tar
+      - firewalld
+    state: present
+
+- name: Write tutorial landing page
+  ansible.builtin.copy:
+    dest: /var/www/html/index.html
+    mode: "0644"
+    content: "<!doctype html><html><body><h1>Hello {{ kafka_user }} from Azure!</h1></body></html>\n"
+
+- name: Download Kafka archive
+  ansible.builtin.get_url:
+    url: "{{ kafka_download_url }}"
+    dest: "{{ kafka_archive }}"
+    mode: "0644"
+  when: not ansible_check_mode
+
+- name: Extract Kafka
+  ansible.builtin.unarchive:
+    src: "{{ kafka_archive }}"
+    dest: "{{ kafka_install_dir }}"
+    remote_src: true
+    creates: "{{ kafka_install_dir }}/{{ kafka_package }}"
+  when: not ansible_check_mode
+
+- name: Link Kafka home
+  ansible.builtin.file:
+    src: "{{ kafka_install_dir }}/{{ kafka_package }}"
+    dest: "{{ kafka_home }}"
+    state: link
+
+- name: Set Kafka ownership
+  ansible.builtin.file:
+    path: "{{ kafka_install_dir }}/{{ kafka_package }}"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_user }}"
+    recurse: true
+
+- name: Install Zookeeper service
+  ansible.builtin.template:
+    src: zookeeper.service.j2
+    dest: /etc/systemd/system/zookeeper.service
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Install Kafka service
+  ansible.builtin.template:
+    src: kafka.service.j2
+    dest: /etc/systemd/system/kafka.service
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Install Kafka profile script
+  ansible.builtin.template:
+    src: kafka.sh.j2
+    dest: /etc/profile.d/kafka.sh
+    mode: "0755"
+
+- name: Flush handlers before starting services
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - httpd.service
+    - zookeeper.service
+    - kafka.service
+    - firewalld.service
+
+- name: Check Kafka firewall rule
+  ansible.builtin.command: firewall-cmd --zone=public --query-port=9092/tcp
+  register: kafka_firewall_rule
+  changed_when: false
+  failed_when: kafka_firewall_rule.rc not in [0, 1]
+
+- name: Open Kafka firewall port
+  ansible.builtin.command: firewall-cmd --zone=public --add-port=9092/tcp --permanent
+  when: kafka_firewall_rule.rc != 0
+  notify: Reload firewalld
+

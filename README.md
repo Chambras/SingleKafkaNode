@@ -17,13 +17,14 @@ Terraform that provisions a single-node Apache Kafka VM on Azure along with the 
 7. [Provision the infrastructure](#provision-the-infrastructure)
 8. [Post-deploy operator checklist](#post-deploy-operator-checklist)
 9. [Install and configure Kafka on the VM](#install-and-configure-kafka-on-the-vm)
-10. [Install the Solace PubSub+ Kafka connector](#install-the-solace-pubsub-kafka-connector)
-11. [Manage Kafka topics](#manage-kafka-topics)
-12. [Configure the Solace source connector](#configure-the-solace-source-connector)
-13. [Consume messages](#consume-messages)
-14. [Tear down](#tear-down)
-15. [Repository layout](#repository-layout)
-16. [Improvement roadmap](#improvement-roadmap)
+10. [Bootstrap alternatives](#bootstrap-alternatives)
+11. [Install the Solace PubSub+ Kafka connector](#install-the-solace-pubsub-kafka-connector)
+12. [Manage Kafka topics](#manage-kafka-topics)
+13. [Configure the Solace source connector](#configure-the-solace-source-connector)
+14. [Consume messages](#consume-messages)
+15. [Tear down](#tear-down)
+16. [Repository layout](#repository-layout)
+17. [Improvement roadmap](#improvement-roadmap)
 
 ---
 
@@ -235,6 +236,20 @@ sudo tail -f /var/log/cloud-init-output.log
 
 ---
 
+## Bootstrap alternatives
+
+Cloud-init is the default supported deployment path, but this repo also includes equivalent examples for learning and troubleshooting:
+
+| Option | Location | Use case |
+| --- | --- | --- |
+| Cloud-init | `cloud-init/kafka-bootstrap.yaml.tftpl` | Default `terraform apply` path. |
+| Standalone script | `scripts/install-kafka.sh` | Manual repair/debug path on an existing VM. |
+| Ansible | `ansible/playbook.yml` | Post-provision configuration management example. |
+
+See [`docs/bootstrap-options.md`](docs/bootstrap-options.md) for commands and comparison details.
+
+---
+
 ## Install the Solace PubSub+ Kafka connector
 
 ```bash
@@ -398,10 +413,17 @@ terraform destroy
 
 ```text
 .
+├── ansible/
+│   ├── inventory.example.ini
+│   ├── playbook.yml
+│   └── roles/kafka/             # optional Ansible bootstrap path
 ├── cloud-init/
 │   └── kafka-bootstrap.yaml.tftpl  # cloud-init template that installs Kafka/Zookeeper
 ├── docs/
+│   ├── bootstrap-options.md      # comparison of bootstrap approaches
 │   └── manual-kafka-setup.md       # learning-path equivalent of the automation
+├── scripts/
+│   └── install-kafka.sh          # standalone shell bootstrap path
 ├── LICENSE
 ├── README.md
 ├── main.tf                   # providers, backend
@@ -429,8 +451,9 @@ flowchart LR
     D[Phase D<br/>Kafka automation<br/>P2]
     E[Phase E<br/>Databricks/storage<br/>P2]
     F[Phase F<br/>Terraform cleanup<br/>P3]
+    G[Phase G<br/>Bootstrap alternatives<br/>P2]
 
-    A --> B --> C --> D --> E --> F
+    A --> B --> C --> D --> E --> F --> G
 ```
 
 | Phase | Focus | Priority | Status |
@@ -441,6 +464,7 @@ flowchart LR
 | D | Automate Kafka/Zookeeper/systemd/firewall via cloud-init | P2 | ✅ Done (cloud-init) |
 | E | Storage network rules + HTTPS-only, Databricks `no_public_ip = true` | P2 | ✅ Done |
 | F | Upgrade to Terraform 1.14.9 + azurerm 4.70.0, switch VM to `azurerm_linux_virtual_machine`, add `min_tls_version = "TLS1_2"` on storage, fix naming typos (`databricksWokspace`, `DBWokspaceSingleNode`, `adlsFyleSytemID`), drop dead commented blocks | P3 | ✅ Done |
+| G | Add standalone shell script and Ansible playbook bootstrap alternatives with comparison docs | P2 | ✅ Done |
 
 ---
 
