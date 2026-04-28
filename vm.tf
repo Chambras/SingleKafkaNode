@@ -13,9 +13,8 @@ resource "azurerm_network_interface" "kafkaNIC" {
   resource_group_name = azurerm_resource_group.genericRG.name
 
   ip_configuration {
-    name      = "kafkaServer"
-    subnet_id = azurerm_subnet.subnets["headnodes"].id
-    #subnet_id                     = data.azurerm_subnet.kafkasubnet.id
+    name                          = "kafkaServer"
+    subnet_id                     = azurerm_subnet.subnets["headnodes"].id
     private_ip_address_allocation = "Dynamic"
     public_ip_address_id          = azurerm_public_ip.kafkaPublicIP.id
   }
@@ -28,57 +27,40 @@ resource "azurerm_network_interface_security_group_association" "kafkaNICNSG" {
   network_security_group_id = azurerm_network_security_group.genericNSG.id
 }
 
-resource "azurerm_virtual_machine" "kafkaServer" {
-  name                  = "${var.suffix}-KafkaServer"
-  location              = azurerm_resource_group.genericRG.location
-  resource_group_name   = azurerm_resource_group.genericRG.name
-  network_interface_ids = ["${azurerm_network_interface.kafkaNIC.id}"]
-  vm_size               = "Standard_DS3_v2"
+resource "azurerm_linux_virtual_machine" "kafkaServer" {
+  name                            = "${var.suffix}-KafkaServer"
+  location                        = azurerm_resource_group.genericRG.location
+  resource_group_name             = azurerm_resource_group.genericRG.name
+  network_interface_ids           = [azurerm_network_interface.kafkaNIC.id]
+  size                            = "Standard_DS3_v2"
+  computer_name                   = "kafkaServer"
+  admin_username                  = var.vmUserName
+  disable_password_authentication = true
 
-  # Uncomment this line to delete the OS disk automatically when deleting the VM
-  delete_os_disk_on_termination = true
+  admin_ssh_key {
+    username   = var.vmUserName
+    public_key = file(pathexpand(var.sshKeyPath))
+  }
 
-  # Uncomment this line to delete the data disks automatically when deleting the VM
-  delete_data_disks_on_termination = true
+  source_image_reference {
+    publisher = var.vmImagePublisher
+    offer     = var.vmImageOffer
+    sku       = var.vmImageSku
+    version   = var.vmImageVersion
+  }
 
-  storage_image_reference {
-    publisher = "RedHat"
-    offer     = "RHEL"
-    sku       = "7-RAW-CI"
-    version   = "latest"
+  os_disk {
+    name                 = "${var.suffix}-kafkaServerosDisk1"
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
   }
-  storage_os_disk {
-    name              = "${var.suffix}-kafkaServerosDisk1"
-    caching           = "ReadWrite"
-    create_option     = "FromImage"
-    managed_disk_type = "Standard_LRS"
-  }
-  os_profile {
-    computer_name  = "kafkaServer"
-    admin_username = var.vmUserName
-    custom_data    = <<-EOF
-    #cloud-config
-    package_upgrade: true
-    packages:
-      - httpd
-      - java-1.8.0-openjdk-devel
-      - tmux
-      - git
-    write_files:
-      - content: <!doctype html><html><body><h1>Hello kafkaAdmin 2019 from Azure!</h1></body></html>
-        path: /var/www/html/index.html
-    runcmd:
-      - [ systemctl, enable, httpd.service ]
-      - [ systemctl, start, httpd.service ]
-    EOF
 
-  }
-  os_profile_linux_config {
-    disable_password_authentication = true
-    ssh_keys {
-      path     = "/home/${var.vmUserName}/.ssh/authorized_keys"
-      key_data = file(pathexpand(var.sshKeyPath))
-    }
-  }
+  custom_data = base64encode(templatefile("${path.module}/cloud-init/kafka-bootstrap.yaml.tftpl", {
+    vm_user       = var.vmUserName
+    java_package  = var.javaPackage
+    kafka_version = var.kafkaVersion
+    scala_version = var.kafkaScalaVersion
+  }))
+
   tags = var.tags
 }

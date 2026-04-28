@@ -1,470 +1,346 @@
-# Single Kafka Node
+# Single Kafka Node on Azure
 
-It creates the following resources:
+Terraform that provisions a single-node Apache Kafka VM on Azure along with the networking, storage, and Azure Databricks workspace needed to ingest messages from a Solace PubSub+ broker and land data for analytics.
 
-* A new Resource Group
-* A RedHat VM
-* A VNet
-* A Storage Account with a container so it can be mounted in DataBricks.
-* 4 subnets to host the Single Kafka VM, but in mind to create a cluster in the future.
-* 2 subnets public and private dedicated to DataBricks Cluster.
-* A Network Security Group with SSH, HTTP and RDP access.
-* A Network Security Group dedicated to the DataBricks Cluster.
-* A DataBricks Workspace with VNet injection.
+> **Scope:** this is a **development** topology (single Kafka broker, single zookeeper, dev Databricks tier). It is intentionally lean — do not use it as-is for production.
 
-## Project Structure
+---
 
-This project has the following files which make them easy to reuse, add or remove.
+## Table of contents
 
-```ssh
-.
-├── LICENSE
-├── README.md
-├── main.tf
-├── networking.tf
-├── outputs.tf
-├── security.tf
-├── storage.tf
-├── variables.tf
-├── vm.tf
-└── workspace.tf
+1. [What this repo provisions](#what-this-repo-provisions)
+2. [Architecture](#architecture)
+3. [What Terraform does vs. what you do manually](#what-terraform-does-vs-what-you-do-manually)
+4. [Prerequisites](#prerequisites)
+5. [Tool and runtime versions](#tool-and-runtime-versions)
+6. [Configuration](#configuration)
+7. [Provision the infrastructure](#provision-the-infrastructure)
+8. [Post-deploy operator checklist](#post-deploy-operator-checklist)
+9. [Install and configure Kafka on the VM](#install-and-configure-kafka-on-the-vm)
+10. [Install the Solace PubSub+ Kafka connector](#install-the-solace-pubsub-kafka-connector)
+11. [Manage Kafka topics](#manage-kafka-topics)
+12. [Configure the Solace source connector](#configure-the-solace-source-connector)
+13. [Consume messages](#consume-messages)
+14. [Tear down](#tear-down)
+15. [Repository layout](#repository-layout)
+16. [Improvement roadmap](#improvement-roadmap)
+
+---
+
+## What this repo provisions
+
+Azure resources created by `terraform apply`:
+
+- A new **resource group**
+- A **virtual network** with:
+  - Four subnets reserved for the Kafka VM (sized so you can grow into a cluster later)
+  - Two subnets (`publicDB`, `privateDB`) dedicated to Databricks VNet injection
+- A **Kafka-admin NSG** allowing SSH and HTTP **only from the IPs you whitelist**, attached to the Kafka NIC
+- A **Databricks NSG** associated with the Databricks subnets
+- A **public IP** + **NIC** + **RHEL VM** that will host Kafka/Zookeeper
+- A **Blob Storage Account** with a `data` container (mounted in Databricks)
+- An **ADLS Gen2 Storage Account** with a `tfms` filesystem
+- An **Azure Databricks workspace** (trial SKU) with VNet injection
+
+See [Repository layout](#repository-layout) for which file owns which resources.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TD
+    RG[Azure Resource Group]
+    VNET[Virtual Network]
+    KSUB[Kafka Subnets]
+    DBSUB[Databricks Subnets]
+    PIP[Kafka Public IP]
+    NIC[Kafka NIC]
+    VM[Kafka VM]
+    GNSG[Kafka Admin NSG]
+    DNSG[Databricks NSG]
+    DBW[Databricks Workspace]
+    SA[Blob Storage Account]
+    DATA[data container]
+    ADLS[ADLS Gen2 Account]
+    FS[tfms filesystem]
+
+    RG --> VNET
+    RG --> GNSG
+    RG --> DNSG
+    RG --> SA
+    RG --> ADLS
+    VNET --> KSUB
+    VNET --> DBSUB
+    KSUB --> NIC
+    PIP --> NIC
+    NIC --> VM
+    GNSG --> NIC
+    DBSUB --> DBW
+    DNSG --> DBSUB
+    SA --> DATA
+    ADLS --> FS
+    DBW -. mounts .-> SA
+    DBW -. mounts .-> ADLS
 ```
 
-Most common parameters are exposed as variables in _`variables.tf`_
+---
 
-## Pre-requisites
+## What Terraform does vs. what you do manually
 
-It is assumed that you have azure CLI and Terraform installed and configured.
-More information on this topic [here](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/terraform-install-configure). I recommend using a Service Principal with a certificate.
+| Concern | Handled by Terraform | Manual on the VM |
+| --- | --- | --- |
+| Azure resource group, VNet, subnets, NSGs | ✅ | |
+| Kafka VM (RHEL), public IP, NIC, NSG attachment | ✅ | |
+| Storage accounts, container, ADLS filesystem | ✅ | |
+| Databricks workspace with VNet injection | ✅ | |
+| Baseline packages on the VM (`httpd`, `java-11-openjdk-devel`, `tmux`, `git`) | ✅ (via `custom_data` cloud-init) | |
+| Download and install Apache Kafka | ✅ (via `cloud-init/kafka-bootstrap.yaml.tftpl`) | |
+| `systemd` units for Zookeeper and Kafka | ✅ (cloud-init) | |
+| Firewall rule for port 9092 | ✅ (cloud-init) | |
+| Installing and configuring the Solace connector | | ✅ |
+| Creating Kafka topics | | ✅ |
 
-### versions
+> Want to learn what the automation does step by step, or reproduce it on a different host? See [`docs/manual-kafka-setup.md`](docs/manual-kafka-setup.md).
 
-This terraform script has been tested using the following versions:
+---
 
-* Terraform =>0.12.24
-* Azure provider 2.10.0
-* Azure CLI 2.6.0
+## Prerequisites
 
-## VM Authentication
+- Azure CLI logged in to the target subscription (`az login`). A Service Principal with a certificate is recommended for automation.
+- Terraform CLI and Azure provider versions listed in [Tool and runtime versions](#tool-and-runtime-versions).
+- An SSH key pair. To create one:
 
-It uses key based authentication and it assumes you already have a key. You can configure the path using the _sshKeyPath_ variable in _`variables.tf`_ You can create one using this command:
+  ```bash
+  ssh-keygen -t rsa -b 4096 -m PEM -C "vm@mydomain.com" -f ~/.ssh/vm_ssh
+  ```
 
-```ssh
-ssh-keygen -t rsa -b 4096 -m PEM -C vm@mydomain.com -f ~/.ssh/vm_ssh
+  The path is passed to Terraform via `sshKeyPath` and is expanded with `pathexpand(...)`, so `~/.ssh/...` works.
+
+More on the Azure provider: <https://docs.microsoft.com/en-us/azure/virtual-machines/linux/terraform-install-configure>.
+
+---
+
+## Tool and runtime versions
+
+This repo currently pins the infrastructure tooling but keeps the Kafka runtime intentionally old to preserve the original tutorial and Solace connector behavior.
+
+| Component | Version | Where configured | Notes |
+| --- | --- | --- | --- |
+| Terraform CLI | `>= 1.14.9` | `main.tf` | Developed and validated with Terraform `1.14.9`. |
+| AzureRM provider | `= 4.70.0` | `main.tf` | Pinned via `required_providers`. |
+| Azure CLI | `2.85.0` | Local prerequisite | Used for Azure auth (`az login`). Newer versions should work. |
+| VM image | Red Hat Enterprise Linux `8_10` | `variables.tf` (`vmImage*`) | Pulled as `latest` from the Azure marketplace. `7-RAW-CI` is deprecated/unavailable in some regions. |
+| Apache Kafka | `2.3.0` | `variables.tf` (`kafkaVersion`) | Requires ZooKeeper. KRaft mode is not available in this version. |
+| Kafka Scala build | `2.12` | `variables.tf` (`kafkaScalaVersion`) | Matches the `kafka_2.12-2.3.0.tgz` artifact. |
+| Java | `java-11-openjdk-devel` | `variables.tf` (`javaPackage`) | Required by Solace connector 3.3.0 (`class file version 55`). Kafka 2.3.0 also runs on Java 11. |
+| Solace PubSub+ Kafka source connector | `3.3.0` | README install command | Installed manually after VM bootstrap. |
+
+> **Kafka note:** newer Kafka releases can run without ZooKeeper using KRaft mode. This repo still uses Kafka `2.3.0`, so ZooKeeper is required. A future Kafka modernization pass could upgrade Kafka and remove `zookeeper.service`.
+
+---
+
+## Configuration
+
+All tunable inputs live in `variables.tf`. A starter file is provided — copy it and edit the values you care about:
+
+```bash
+cp terraform.tfvars.example terraform.tfvars
+$EDITOR terraform.tfvars
 ```
 
-## Usage
+**Variables you almost always want to override:**
 
-Just run these commands to initialize terraform, get a plan and approve it to apply it.
+| Variable | Why |
+| --- | --- |
+| `sourceIPs` | List of CIDRs or IPs allowed to reach SSH/HTTP on the Kafka VM. **Default is the repo author's home IP for dev convenience — change it.** |
+| `sshKeyPath` | Path to your public key; supports `~`. |
+| `storageAccountName` | Must be globally unique, 3–24 lowercase alphanumeric characters. |
+| `location` | Azure region. |
+| `suffix`, `rgName`, `workspaceName` | Give the deployment recognizable names. |
+| `javaPackage` | Keep as `java-11-openjdk-devel` for Solace connector 3.3.0 unless you also change connector/runtime versions. |
 
-```ssh
+> **Tip:** the storage account name is used as a prefix for the ADLS account (`<name>adsl`), so keep it short enough to fit under 24 characters.
+
+---
+
+## Provision the infrastructure
+
+From the repo root:
+
+```bash
 terraform fmt
 terraform init
 terraform validate
-terraform plan
-terraform apply
+terraform plan -out tfplan
+terraform apply tfplan
 ```
 
-I also recommend using a remote state instead of a local one. You can change this configuration in _`main.tf`_
-You can create a free Terraform Cloud account [here](https://app.terraform.io).
+A remote backend is recommended rather than local state — see `main.tf`. A free Terraform Cloud account works: <https://app.terraform.io>.
 
-The terraform script installs the following extra packages on the VM:
+Useful outputs after `apply`:
 
-* java-1.8.0-openjdk-devel (**Required**)
-* tmux (Optional)
-* git (**Required**)
+- `kafkaPublicIP` — the VM's public IP (SSH target).
+- `storageAccountKey` — **sensitive**, use `terraform output -raw storageAccountKey`.
+- `databricksWorkspaceURL` — click-through to the workspace.
 
-Optional: It is recommended to install `jq` to parse JSON requests in the future
+---
 
-```ssh
-wget -O jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
-chmod +x ./jq
-sudo cp jq /usr/bin
+## Post-deploy operator checklist
+
+Run through this list before handing the environment to anyone:
+
+- [ ] `sourceIPs` contains **only** the IPs that should have SSH/HTTP access.
+- [ ] You can `ssh kafkaAdmin@<kafkaPublicIP> -i <path-to-private-key>`.
+- [ ] Storage account key is **not** pasted into shared channels (`terraform output storageAccountKey` is marked sensitive).
+- [ ] Databricks workspace opens and can mount the `data` container and `tfms` filesystem. (Storage accounts now default-deny: only `sourceIPs`, the Kafka subnet, and the Databricks subnets are allowed.)
+- [ ] Tag/label the resource group with an owner and expiration if your subscription enforces it.
+- [ ] Destroy the environment when you are done (see [Tear down](#tear-down)).
+
+---
+
+## Install and configure Kafka on the VM
+
+Cloud-init (`cloud-init/kafka-bootstrap.yaml.tftpl`) runs on first boot and:
+
+- Installs `httpd`, `java-11-openjdk-devel`, `tmux`, `git`, `wget`, `tar`, and `firewalld`.
+- Downloads Apache Kafka `${kafkaVersion}` (Scala `${kafkaScalaVersion}`) from `archive.apache.org` to `/opt/kafka`.
+- Writes systemd units for **Zookeeper** and **Kafka** owned by the `vmUserName` account.
+- Enables and starts both services (idempotent — safe to re-run).
+- Opens TCP `9092` in `firewalld`.
+- Puts Kafka tools on `PATH` for all users via `/etc/profile.d/kafka.sh`.
+
+The Kafka/Scala versions are tunable via the `kafkaVersion` and `kafkaScalaVersion` variables.
+
+### Verify the bootstrap
+
+SSH in and check:
+
+```bash
+ssh kafkaAdmin@<kafkaPublicIP> -i ~/.ssh/vm_ssh
+
+systemctl is-active zookeeper
+systemctl is-active kafka
+ss -ltn | grep -E '(2181|9092)'
+kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
-> [!IMPORTANT]
-> Kafka and the Solace Connector do need Java 8 in order to run and Git is needed in order to clone and build the Solace connector. This terraform script takes care of these requirements, but if you are going to configure Kafka on an existing VM, please make sure Java and Git are installed.
+If cloud-init is still running the first time you SSH in, tail its log:
 
-## Kafka Installation and Configuration
-
-ssh into the new VM once it is ready
-
-```ssh
-ssh kafkaAdmin@IP -i {{PATH/TO/SSHKEY}}
+```bash
+sudo tail -f /var/log/cloud-init-output.log
 ```
 
-_`kafkaAdmin`_ is the user name that can be customized using the variable _`vmUserName`_ in _`variables.tf`_ file. Also remember to whitelist your source IP or IPs in the variable _`sourceIPs`_. Otherwise you might not be able to ssh into the VM.
+> Prefer to learn the setup by hand, or need to reproduce it elsewhere? See [`docs/manual-kafka-setup.md`](docs/manual-kafka-setup.md).
 
-Get Apache Kafka version 2.3.0
+---
 
-```ssh
-sudo wget https://www-eu.apache.org/dist/kafka/2.3.0/kafka_2.12-2.3.0.tgz -O /opt/kafka_2.12-2.3.0.tgz
-cd /opt
-sudo tar -xvf kafka_2.12-2.3.0.tgz
-sudo ln -s /opt/kafka_2.12-2.3.0 /opt/kafka
-sudo chown -R kafkaAdmin:kafkaAdmin /opt/kafka*
-sudo rm *.tgz
-cd
+## Install the Solace PubSub+ Kafka connector
+
+```bash
+wget https://solaceproducts.github.io/pubsubplus-connector-kafka-source/downloads/pubsubplus-connector-kafka-source-3.3.0.zip
+unzip pubsubplus-connector-kafka-source-3.3.0.zip
+cp -v pubsubplus-connector-kafka-source-3.3.0/lib/*.jar /opt/kafka/libs/
 ```
 
-We create the init file for Zookeeper service in */etc/systemd/system/zookeeper.service* with the following content:
+This bundle ships all dependencies — no Maven build required. To build from source instead, see the upstream [README](https://github.com/SolaceProducts/pubsubplus-connector-kafka-source).
 
-```ssh
-sudo vi /etc/systemd/system/zookeeper.service
-[Unit]
-Description=zookeeper
-After=syslog.target network.target
+---
 
-[Service]
-Type=simple
+## Manage Kafka topics
 
-User=kafkaAdmin
-Group=kafkaAdmin
+All commands below use `--bootstrap-server` (the supported flag for Kafka 2.2+). `--zookeeper` is deprecated and should not be used.
 
-ExecStart=/opt/kafka/bin/zookeeper-server-start.sh /opt/kafka/config/zookeeper.properties
-ExecStop=/opt/kafka/bin/zookeeper-server-stop.sh
+Because this is a single-broker node, use `--replication-factor 1`.
 
-[Install]
-WantedBy=multi-user.target
+### Create topics
+
+```bash
+kafka-topics.sh --bootstrap-server localhost:9092 --create --replication-factor 1 --partitions 1 --topic stdds
+kafka-topics.sh --bootstrap-server localhost:9092 --create --replication-factor 1 --partitions 1 --topic tfms
 ```
 
-The same applies to the next init file for Kafka, */etc/systemd/system/kafka.service*, that contains the following lines of configuration:
+### List topics
 
-```ssh
-sudo vi /etc/systemd/system/kafka.service
-[Unit]
-Description=Apache Kafka
-Requires=zookeeper.service
-After=zookeeper.service
-
-[Service]
-Type=simple
-
-User=kafkaAdmin
-Group=kafkaAdmin
-
-ExecStart=/opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/server.properties
-ExecStop=/opt/kafka/bin/kafka-server-stop.sh
-
-[Install]
-WantedBy=multi-user.target
+```bash
+kafka-topics.sh --bootstrap-server localhost:9092 --list
 ```
 
-We need to reload *systemd* to get it read the new init files:
+### Describe a topic
 
-```ssh
-sudo systemctl daemon-reload
+```bash
+kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic tfms
 ```
 
-Now we can start our new services (in this order):
+### Delete a topic
 
-```ssh
-sudo systemctl start zookeeper
-sudo systemctl start kafka
+```bash
+kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic stdds
+kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic tfms
 ```
 
-If all goes well, *systemd* should report running state on both service's status
+---
 
-```ssh
-sudo systemctl status zookeeper.service
-sudo systemctl status kafka.service
-```
+## Configure the Solace source connector
 
-If needed, we can enable automatic start on boot for both services
+Edit `/opt/kafka/config/connect-standalone.properties` and set:
 
-```ssh
-sudo systemctl enable zookeeper.service
-sudo systemctl enable kafka.service
-```
-
-Open Kafka port in firewall. 9092 is the default port.
-
-```ssh
-sudo firewall-cmd --zone=public --add-port=9092/tcp --permanent
-sudo firewall-cmd --reload
-```
-
-Add kafka tools to path
-
-```ssh
-export KAFKA_HOME=/opt/kafka
-export PATH=$KAFKA_HOME/bin:$PATH
-```
-
-## Get Solace Connector and its Dependencies
-
-You can get the current Solace Connector version which is 2.0.1 and its dependencies using the following command
-
-```ssh
-wget https://solaceproducts.github.io/pubsubplus-connector-kafka-source/downloads/pubsubplus-connector-kafka-source-2.0.1.zip
-```
-
-unpack and copy the connector and its dependencies to ~/kafka_2.12-2.3.0/libs/
-
-```ssh
-unzip pubsubplus-connector-kafka-source-2.0.1.zip
-cp -v pubsubplus-connector-kafka-source-2.0.1/lib/*.jar /opt/kafka/libs/
-```
-
-This new version packages everything together so you do not need to build and get the dependencies from maven or somewhere else.
-In case you want build it yourself you can find more information on their [README](https://github.com/SolaceProducts/pubsubplus-connector-kafka-source).
-
-## Manage Apache Kafka topics
-
-Create a topic
-
-```ssh
-# stdds
-kafka-topics.sh --create --replication-factor 3 --partitions 1 --topic stdds --zookeeper localhost:9092
-
-#tfms
-kafka-topics.sh --create --bootstrap-server localhost:9092 --replication-factor 1 --partitions 1 --topic tfms
-```
-
-List topics
-
-```ssh
-kafka-topics.sh --list --bootstrap-server localhost:9092
-```
-
-Delete topics
-
-```ssh
-# stdds
-kafka-topics.sh --delete --topic stdds --bootstrap-server localhost:9092
-
-# tfms
-kafka-topics.sh --delete --topic tfms --bootstrap-server localhost:9092
-```
-
-Describe topics
-
-```ssh
-# stdds
-kafka-topics.sh --describe --topic tfms --bootstrap-server localhost:9092
-
-# tfms
-kafka-topics.sh --describe --topic tfms --bootstrap-server localhost:9092
-```
-
-## Configure Solace Connector to connect to SWIM Data Source
-
-Update `/opt/kafka/config/connect-standalone.properties`
-set:
-
-```vi
-bootstrap.servers= localhost:9092
-
-key.converter=org.apache.kafka.connect.storage.StringConverter
-value.converter=org.apache.kafka.connect.storage.StringConverter
-```
-
-```ssh
-vi /opt/kafka/config/connect-standalone.properties
-```
-
-This is the final content of the file
-
-```ssh
-# Licensed to the Apache Software Foundation (ASF) under one or more
-# contributor license agreements.  See the NOTICE file distributed with
-# this work for additional information regarding copyright ownership.
-# The ASF licenses this file to You under the Apache License, Version 2.0
-# (the "License"); you may not use this file except in compliance with
-# the License.  You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# These are defaults. This file just demonstrates how to override some settings.
+```properties
 bootstrap.servers=localhost:9092
-
-# The converters specify the format of data in Kafka and how to translate it into Connect data. Every Connect user will
-# need to configure these based on the format they want their data in when loaded from or stored into Kafka
 key.converter=org.apache.kafka.connect.storage.StringConverter
 value.converter=org.apache.kafka.connect.storage.StringConverter
-# Converter-specific settings can be passed in by prefixing the Converter's setting with the converter we want to apply
-# it to
 key.converter.schemas.enable=true
 value.converter.schemas.enable=true
-
 offset.storage.file.filename=/tmp/connect.offsets
-# Flush much faster than normal, which is useful for testing/debugging
 offset.flush.interval.ms=10000
-
-# Set to a list of filesystem paths separated by commas (,) to enable class loading isolation for plugins
-# (connectors, converters, transformations). The list should consist of top level directories that include
-# any combination of:
-# a) directories immediately containing jars with plugins and their dependencies
-# b) uber-jars with plugins and their dependencies
-# c) directories immediately containing the package directory structure of classes of plugins and their dependencies
-# Note: symlinks will be followed to discover dependencies or plugins.
-# Examples:
-# plugin.path=/usr/local/share/java,/usr/local/share/kafka/plugins,/opt/connectors,
-#plugin.path=
 ```
 
-Create stdds and/or tfms config connectors
+Create one connector properties file per source topic:
 
-```ssh
-# stdds
+```bash
 sudo vi /opt/kafka/config/connect-solace-stdds-source.properties
-
-# tfms
 sudo vi /opt/kafka/config/connect-solace-tfms-source.properties
 ```
 
-> These values are mandatory and you need provide them:
+The mandatory values (replace the `{{ }}` placeholders) are:
 
-```vi
-name
-kafka.topic
-sol.host
-sol.username
-sol.password
-sol.vpn_name
-sol.queue
-```
+| Property | Meaning |
+| --- | --- |
+| `name` | Unique connector name |
+| `kafka.topic` | Target Kafka topic |
+| `sol.host` | `host:port` of the Solace broker |
+| `sol.username` / `sol.password` | Broker credentials |
+| `sol.vpn_name` | Solace VPN name |
+| `sol.queue` | Queue the connector consumes from (must exist) |
 
-The values that need to be replaced are between {{ }}.
+Minimal connector file:
 
-This is the final content of the file
-
-```ssh
-# PubSub+ Kafka Source Connector parameters
-# GitHub project https://github.com/SolaceProducts/pubsubplus-connector-kafka-source
-#######################################################################################
-
-# Kafka connect params
-# Refer to https://kafka.apache.org/documentation/#connect_configuring
+```properties
 name={{ connectorName }}
 connector.class=com.solace.connector.kafka.connect.source.SolaceSourceConnector
-tasks.max=1
+tasks.max=2
 value.converter=org.apache.kafka.connect.converters.ByteArrayConverter
 key.converter=org.apache.kafka.connect.storage.StringConverter
 
-# Destination Kafka topic the connector will write to
 kafka.topic={{ kafkaTopic }}
 
-# PubSub+ connection information
 sol.host={{ SWIMEndpoint }}:{{ SWIMEndpointPort }}
-sol.username={{ SWIMUserNaMe }}
+sol.username={{ SWIMUserName }}
 sol.password={{ Password }}
 sol.vpn_name={{ SWIMVPN }}
-
-# Comma separated list of PubSub+ topics to subscribe to
-# If tasks.max>1, use shared subscriptions otherwise each task's subscription will receive same message
-# Refer to https://docs.solace.com/PubSub-Basics/Direct-Messages.htm#Shared
-# example shared subscription to "topic": "#share/group1/topic"
-sol.topics=sourcetest
-
-# PubSub+ queue name to consume from, must exist on event broker
 sol.queue={{ SWIMQueue }}
 
-# PubSub+ Kafka Source connector message processor
-# Refer to https://github.com/SolaceProducts/pubsubplus-connector-kafka-source
 sol.message_processor_class=com.solace.connector.kafka.connect.source.msgprocessors.SolaceSampleKeyedMessageProcessor
-
-# When using SolaceSampleKeyedMessageProcessor, defines which part of a
-# PubSub+ message shall be converted to a Kafka record key
-# Allowable values include: NONE, DESTINATION, CORRELATION_ID, CORRELATION_ID_AS_BYTES
-#sol.kafka_message_key=NONE
-
-# Connector TLS session to PubSub+ message broker properties
-# Specify if required when using TLS / Client certificate authentication
-# May require setup of keystore and truststore on each host where the connector is deployed
-# Refer to https://docs.solace.com/Overviews/TLS-SSL-Message-Encryption-Overview.htm
-# and https://docs.solace.com/Overviews/Client-Authentication-Overview.htm#Client-Certificate
-#sol.authentication_scheme=
-#sol.ssl_connection_downgrade_to=
-#sol.ssl_excluded_protocols=
-#sol.ssl_cipher_suites=
 sol.ssl_validate_certificate=false
-#sol.ssl_validate_certicate_date=
-#sol.ssl_trust_store=
-#sol.ssl_trust_store_password=
-#sol.ssl_trust_store_format=
-#sol.ssl_trusted_common_name_list=
-#sol.ssl_key_store=
-#sol.ssl_key_store_password=
-#sol.ssl_key_store_format=
-#sol.ssl_key_store_normalized_format=
-#sol.ssl_private_key_alias=
-#sol.ssl_private_key_password=
-
-# Connector Kerberos authentication of PubSub+ message broker properties
-# Specify if required when using Kerberos authentication
-# Refer to https://docs.solace.com/Overviews/Client-Authentication-Overview.htm#Kerberos
-# Example:
-#sol.authentication_scheme=AUTHENTICATION_SCHEME_GSS_KRB
-#sol.kerberos.login.conf=/opt/kerberos/login.conf
-#sol.kerberos.krb5.conf=/opt/kerberos/krb5.conf
-#sol.krb_service_name=
-
-# Solace Java properties to tune for creating a channel connection
-# Leave at default unless required
-# Look up meaning at https://docs.solace.com/API-Developer-Online-Ref-Documentation/java/com/solacesystems/jcsmp/JCSMPChannelProperties.html
-#sol.channel_properties.connect_timout_in_millis=
-#sol.channel_properties.read_timeout_in_millis=
-#sol.channel_properties.connect_retries=
-#sol.channel_properties.reconnect_retries=
-#sol.channnel_properties.connect_retries_per_host=
-#sol.channel_properties.reconnect_retry_wait_in_millis=
-#sol.channel_properties.keep_alive_interval_in_millis=
-#sol.channel_properties.keep_alive_limit=
-#sol.channel_properties.send_buffer=
-#sol.channel_properties.receive_buffer=
-#sol.channel_properties.tcp_no_delay=
-#sol.channel_properties.compression_level=
-
-# Solace Java tuning properties
-# Leave at default unless required
-# Look up meaning at https://docs.solace.com/API-Developer-Online-Ref-Documentation/java/com/solacesystems/jcsmp/JCSMPProperties.html
-#sol.message_ack_mode=
-#sol.session_name=
-#sol.localhost=
-#sol.client_name=
-#sol.generate_sender_id=
-#sol.generate_rcv_timestamps=
-#sol.generate_send_timestamps=
-#sol.generate_sequence_numbers=
-#sol.calculate_message_expiration=
-#sol.reapply_subscriptions=
-#sol.pub_multi_thread=
-#sol.pub_use_immediate_direct_pub=
-#sol.message_callback_on_reactor=
-#sol.ignore_duplicate_subscription_error=
-#sol.ignore_subscription_not_found_error=
-#sol.no_local=
-#sol.ack_event_mode=
-#sol.sub_ack_window_size=
-#sol.pub_ack_window_size=
-#sol.sub_ack_time=
-#sol.pub_ack_time=
-#sol.sub_ack_window_threshold=
-#sol.max_resends=
-#sol.gd_reconnect_fail_action=
-#sol.susbcriber_local_priority=
-#sol.susbcriber_network_priority=
-#sol.subscriber_dto_override=
-
-
 ```
 
-restart kafka service
+TLS, Kerberos, and JCSMP tuning options can be added as needed — see the [upstream docs](https://github.com/SolaceProducts/pubsubplus-connector-kafka-source) for the full list.
 
-```ssh
+Restart Kafka and start the connector in standalone mode:
+
+```bash
 sudo systemctl restart kafka.service
-```
 
-Start standalone connection
-
-```ssh
 # stdds
 connect-standalone.sh /opt/kafka/config/connect-standalone.properties /opt/kafka/config/connect-solace-stdds-source.properties
 
@@ -472,45 +348,108 @@ connect-standalone.sh /opt/kafka/config/connect-standalone.properties /opt/kafka
 connect-standalone.sh /opt/kafka/config/connect-standalone.properties /opt/kafka/config/connect-solace-tfms-source.properties
 ```
 
-Check incoming messages. This command will display all the messages from the beginning and might take some time if you have lots of messages.
+If you see an error like this:
 
-```ssh
-# stdds
+```text
+java.lang.UnsupportedClassVersionError: com/solace/connector/kafka/connect/source/SolaceSourceConnector has been compiled by a more recent version of the Java Runtime (class file version 55.0), this version of the Java Runtime only recognizes class file versions up to 52.0
+```
+
+the VM is running Java 8. Solace connector 3.3.0 requires Java 11. New VMs install Java 11 through `javaPackage`; on an existing VM, install it manually and restart Kafka/connect:
+
+```bash
+sudo yum install -y java-11-openjdk-devel
+java -version
+sudo systemctl restart kafka.service
+```
+
+---
+
+## Consume messages
+
+Read from the beginning (may be slow on busy topics):
+
+```bash
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic stdds --from-beginning
-
-# tfms
-kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tfms --from-beginning
+kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tfms  --from-beginning
 ```
 
-If you just want to check specific messages and not display all of them, you can use the `--max-messages` option.
-The following comand will display the first message.
+Read just the first message:
 
-```ssh
-# stdds
-kafka-console-consumer.sh --from-beginning --max-messages 1 --topic stdds --bootstrap-server localhost:9092
-
-# tfms
-kafka-console-consumer.sh --from-beginning --max-messages 1 --topic tfms --bootstrap-server localhost:9092
+```bash
+kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic stdds --from-beginning --max-messages 1
+kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tfms  --from-beginning --max-messages 1
 ```
 
-if you want to see all available options, just run the `kafka-console-consumer.sh` without any options
+Run `kafka-console-consumer.sh` with no arguments to see all options.
 
-```ssh
-kafka-console-consumer.sh
+---
+
+## Tear down
+
+```bash
+terraform destroy
 ```
 
-## Clean resources
+> ⚠️ This removes **everything** the stack created, including storage accounts and their data.
 
-It will destroy everything that was created.
+---
 
-```ssh
-terraform destroy --force
+## Repository layout
+
+```text
+.
+├── cloud-init/
+│   └── kafka-bootstrap.yaml.tftpl  # cloud-init template that installs Kafka/Zookeeper
+├── docs/
+│   └── manual-kafka-setup.md       # learning-path equivalent of the automation
+├── LICENSE
+├── README.md
+├── main.tf                   # providers, backend
+├── networking.tf             # VNet, subnets
+├── security.tf               # NSGs + rules
+├── storage.tf                # Blob + ADLS Gen2 + container/filesystem
+├── vm.tf                     # public IP, NIC, NSG association, Kafka VM
+├── workspace.tf              # Databricks workspace (VNet injection)
+├── variables.tf              # input variables
+├── outputs.tf                # exported values (storage key is sensitive)
+└── terraform.tfvars.example  # starter config — copy to terraform.tfvars
 ```
+
+---
+
+## Improvement roadmap
+
+Tracked in detail in the session plan; high level:
+
+```mermaid
+flowchart LR
+    A[Phase A<br/>Infrastructure hardening<br/>P1]
+    B[Phase B<br/>Deployment safety<br/>P1]
+    C[Phase C<br/>Docs and diagrams<br/>P1]
+    D[Phase D<br/>Kafka automation<br/>P2]
+    E[Phase E<br/>Databricks/storage<br/>P2]
+    F[Phase F<br/>Terraform cleanup<br/>P3]
+
+    A --> B --> C --> D --> E --> F
+```
+
+| Phase | Focus | Priority | Status |
+| --- | --- | --- | --- |
+| A | NSG attached to Kafka NIC, HTTP restricted, SSH path expansion, sensitive outputs | P1 | ✅ Done |
+| B | Remove unused variables, clean descriptions, `terraform.tfvars.example` | P1 | ✅ Done |
+| C | Restructured README, architecture + roadmap diagrams, operator checklist | P1 | ✅ Done |
+| D | Automate Kafka/Zookeeper/systemd/firewall via cloud-init | P2 | ✅ Done (cloud-init) |
+| E | Storage network rules + HTTPS-only, Databricks `no_public_ip = true` | P2 | ✅ Done |
+| F | Upgrade to Terraform 1.14.9 + azurerm 4.70.0, switch VM to `azurerm_linux_virtual_machine`, add `min_tls_version = "TLS1_2"` on storage, fix naming typos (`databricksWokspace`, `DBWokspaceSingleNode`, `adlsFyleSytemID`), drop dead commented blocks | P3 | ✅ Done |
+
+---
 
 ## Caution
 
-Be aware that by running this script your account might get billed.
+Running this repository provisions billable Azure resources. Be sure to `terraform destroy` when you are done.
+
+---
 
 ## Authors
 
-* Marcelo Zambrana
+- Marcelo Zambrana

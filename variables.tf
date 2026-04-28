@@ -6,7 +6,7 @@ variable "location" {
 
 variable "suffix" {
   type        = string
-  default     = "bts"
+  default     = "mz"
   description = "Prefix/suffix added to resource names for identification."
 }
 
@@ -20,9 +20,8 @@ variable "tags" {
   type = map(any)
   default = {
     "Environment" = "Dev"
-    "Project"     = "BTS-SWIM"
+    "Project"     = "Learning"
     "BillingCode" = "Internal"
-    "Customer"    = "DOT"
   }
   description = "Tags applied to all resources."
 }
@@ -67,14 +66,14 @@ variable "sourceIPs" {
 
 variable "workspaceName" {
   type        = string
-  default     = "DBWokspaceSingleNode"
+  default     = "DBWorkspaceSingleNode"
   description = "Databricks Workspace name (appended to var.suffix)."
 }
 
 ## Storage
 variable "storageAccountName" {
   type        = string
-  default     = "btsclstrdataingested"
+  default     = "mzvclstrdataingested"
   description = "Storage account name. MUST be globally unique, 3-24 chars, lowercase letters and numbers only. An ADLS Gen2 account is also created with the suffix 'adsl'."
 }
 
@@ -89,4 +88,53 @@ variable "sshKeyPath" {
   type        = string
   default     = "~/.ssh/vm_ssh.pub"
   description = "Path to the SSH public key injected into the VM. Supports '~' expansion."
+}
+
+variable "vmImagePublisher" {
+  type        = string
+  default     = "RedHat"
+  description = "Azure Marketplace publisher for the Kafka VM image."
+}
+
+variable "vmImageOffer" {
+  type        = string
+  default     = "RHEL"
+  description = "Azure Marketplace offer for the Kafka VM image."
+}
+
+variable "vmImageSku" {
+  type        = string
+  default     = "8_10"
+  description = "Azure Marketplace SKU for the Kafka VM image. RHEL 7-RAW-CI is deprecated/unavailable in some regions."
+}
+
+variable "vmImageVersion" {
+  type        = string
+  default     = "latest"
+  description = "Azure Marketplace version for the Kafka VM image."
+}
+
+variable "javaPackage" {
+  type        = string
+  default     = "java-11-openjdk-devel"
+  description = "Java package installed on the Kafka VM. Java 11 is required by the Solace PubSub+ Kafka source connector 3.3.0."
+}
+
+variable "kafkaVersion" {
+  type        = string
+  default     = "2.3.0"
+  description = "Apache Kafka version installed on the VM by cloud-init."
+}
+
+variable "kafkaScalaVersion" {
+  type        = string
+  default     = "2.12"
+  description = "Scala build of Apache Kafka to install (matches the kafka_<scala>-<kafka>.tgz artifact)."
+}
+
+## Databricks
+variable "databricksNoPublicIP" {
+  type        = bool
+  default     = true
+  description = "If true (default), the Databricks workspace uses Secure Cluster Connectivity and worker nodes have no public IPs. Set to false only if your scenario requires public worker IPs."
 }

@@ -28,7 +28,7 @@ output "storageAccountKey" {
   sensitive   = true
 }
 
-output "adlsFyleSytemID" {
+output "adlsFileSystemID" {
   value = azurerm_storage_data_lake_gen2_filesystem.ADLSFileSystemTFMS.id
 }
 
@@ -39,13 +39,13 @@ output "vNetID" {
 output "subnets" {
   value = {
     for subnet in azurerm_subnet.subnets :
-    subnet.name => subnet.address_prefix
+    subnet.name => subnet.address_prefixes
   }
 }
 
 output "dataBricksSubnets" {
   value = {
     for subnet in azurerm_subnet.dbSubnets :
-    subnet.name => subnet.address_prefix
+    subnet.name => subnet.address_prefixes
   }
 }

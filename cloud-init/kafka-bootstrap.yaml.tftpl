@@ -1,0 +1,87 @@
+#cloud-config
+package_upgrade: true
+packages:
+  - httpd
+  - ${java_package}
+  - tmux
+  - git
+  - wget
+  - tar
+  - firewalld
+
+write_files:
+  - path: /var/www/html/index.html
+    content: |
+      <!doctype html><html><body><h1>Hello ${vm_user} from Azure!</h1></body></html>
+
+  - path: /etc/systemd/system/zookeeper.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=zookeeper
+      After=syslog.target network.target
+
+      [Service]
+      Type=simple
+      User=${vm_user}
+      Group=${vm_user}
+      ExecStart=/opt/kafka/bin/zookeeper-server-start.sh /opt/kafka/config/zookeeper.properties
+      ExecStop=/opt/kafka/bin/zookeeper-server-stop.sh
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/kafka.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Apache Kafka
+      Requires=zookeeper.service
+      After=zookeeper.service
+
+      [Service]
+      Type=simple
+      User=${vm_user}
+      Group=${vm_user}
+      ExecStart=/opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/server.properties
+      ExecStop=/opt/kafka/bin/kafka-server-stop.sh
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/profile.d/kafka.sh
+    permissions: "0755"
+    content: |
+      export KAFKA_HOME=/opt/kafka
+      export PATH=$KAFKA_HOME/bin:$PATH
+
+  - path: /usr/local/sbin/install-kafka.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      KAFKA_VERSION="${kafka_version}"
+      SCALA_VERSION="${scala_version}"
+      KAFKA_PKG="kafka_$${SCALA_VERSION}-$${KAFKA_VERSION}"
+      KAFKA_TGZ="/opt/$${KAFKA_PKG}.tgz"
+      if [ ! -d "/opt/$${KAFKA_PKG}" ]; then
+        wget -q "https://archive.apache.org/dist/kafka/$${KAFKA_VERSION}/$${KAFKA_PKG}.tgz" -O "$${KAFKA_TGZ}"
+        tar -xzf "$${KAFKA_TGZ}" -C /opt
+        rm -f "$${KAFKA_TGZ}"
+      fi
+      ln -sfn "/opt/$${KAFKA_PKG}" /opt/kafka
+      chown -R ${vm_user}:${vm_user} "/opt/$${KAFKA_PKG}" /opt/kafka
+
+runcmd:
+  - [ systemctl, enable, httpd.service ]
+  - [ systemctl, start,  httpd.service ]
+  - [ /usr/local/sbin/install-kafka.sh ]
+  - [ systemctl, daemon-reload ]
+  - [ systemctl, enable, zookeeper.service ]
+  - [ systemctl, start,  zookeeper.service ]
+  - [ systemctl, enable, kafka.service ]
+  - [ systemctl, start,  kafka.service ]
+  - [ systemctl, enable, firewalld ]
+  - [ systemctl, start,  firewalld ]
+  - [ firewall-cmd, --zone=public, --add-port=9092/tcp, --permanent ]
+  - [ firewall-cmd, --reload ]

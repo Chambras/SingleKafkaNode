@@ -35,5 +35,11 @@ resource "azurerm_network_security_group" "dataBricksNSG" {
   location            = azurerm_resource_group.genericRG.location
   resource_group_name = azurerm_resource_group.genericRG.name
 
+  # Intentionally left empty: Azure Databricks adds the inbound/outbound rules
+  # required by VNet-injected workspaces at workspace creation time, because the
+  # subnets are delegated to Microsoft.Databricks/workspaces. Do not add custom
+  # deny rules here without consulting the Databricks VNet-injection docs:
+  # https://learn.microsoft.com/azure/databricks/security/network/classic/vnet-inject
+
   tags = var.tags
 }
