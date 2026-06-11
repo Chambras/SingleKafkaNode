@@ -128,10 +128,10 @@ This repo currently pins the infrastructure tooling but keeps the Kafka runtime 
 
 | Component | Version | Where configured | Notes |
 | --- | --- | --- | --- |
-| Terraform CLI | `>= 1.14.9` | `main.tf` | Developed and validated with Terraform `1.14.9`. |
-| AzureRM provider | `= 4.70.0` | `main.tf` | Pinned via `required_providers`. |
-| Azure CLI | `2.85.0` | Local prerequisite | Used for Azure auth (`az login`). Newer versions should work. |
-| VM image | Red Hat Enterprise Linux `8_10` | `variables.tf` (`vmImage*`) | Pulled as `latest` from the Azure marketplace. `7-RAW-CI` is deprecated/unavailable in some regions. |
+| Terraform CLI | `>= 1.15.6` | `main.tf` | Developed and validated with Terraform `1.15.6`. |
+| AzureRM provider | `= 4.76.0` | `main.tf` | Pinned via `required_providers`. |
+| Azure CLI | `2.87.0` | Local prerequisite | Used for Azure auth (`az login`). Newer versions should work. |
+| VM image | Red Hat Enterprise Linux `9_7` | `variables.tf` (`vmImage*`) | Pulled as `latest` from the Azure marketplace. RHEL 9_7 ships `java-11-openjdk-devel`; RHEL 10 drops OpenJDK 11, and `7-RAW-CI` is deprecated/unavailable in some regions. |
 | Apache Kafka | `2.3.0` | `variables.tf` (`kafkaVersion`) | Requires ZooKeeper. KRaft mode is not available in this version. |
 | Kafka Scala build | `2.12` | `variables.tf` (`kafkaScalaVersion`) | Matches the `kafka_2.12-2.3.0.tgz` artifact. |
 | Java | `java-11-openjdk-devel` | `variables.tf` (`javaPackage`) | Required by Solace connector 3.3.0 (`class file version 55`). Kafka 2.3.0 also runs on Java 11. |
@@ -273,6 +273,7 @@ Because this is a single-broker node, use `--replication-factor 1`.
 ```bash
 kafka-topics.sh --bootstrap-server localhost:9092 --create --replication-factor 1 --partitions 1 --topic stdds
 kafka-topics.sh --bootstrap-server localhost:9092 --create --replication-factor 1 --partitions 1 --topic tfms
+kafka-topics.sh --bootstrap-server localhost:9092 --create --replication-factor 1 --partitions 1 --topic tbfm
 ```
 
 ### List topics
@@ -315,6 +316,7 @@ Create one connector properties file per source topic:
 ```bash
 sudo vi /opt/kafka/config/connect-solace-stdds-source.properties
 sudo vi /opt/kafka/config/connect-solace-tfms-source.properties
+sudo vi /opt/kafka/config/connect-solace-tbfm-source.properties
 ```
 
 The mandatory values (replace the `{{ }}` placeholders) are:
@@ -361,6 +363,9 @@ connect-standalone.sh /opt/kafka/config/connect-standalone.properties /opt/kafka
 
 # tfms
 connect-standalone.sh /opt/kafka/config/connect-standalone.properties /opt/kafka/config/connect-solace-tfms-source.properties
+
+# tbfm
+connect-standalone.sh /opt/kafka/config/connect-standalone.properties /opt/kafka/config/connect-solace-tbfm-source.properties
 ```
 
 If you see an error like this:
@@ -386,6 +391,7 @@ Read from the beginning (may be slow on busy topics):
 ```bash
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic stdds --from-beginning
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tfms  --from-beginning
+kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tbfm  --from-beginning
 ```
 
 Read just the first message:
@@ -393,6 +399,7 @@ Read just the first message:
 ```bash
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic stdds --from-beginning --max-messages 1
 kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tfms  --from-beginning --max-messages 1
+kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic tbfm  --from-beginning --max-messages 1
 ```
 
 Run `kafka-console-consumer.sh` with no arguments to see all options.
@@ -436,35 +443,6 @@ terraform destroy
 ├── outputs.tf                # exported values (storage key is sensitive)
 └── terraform.tfvars.example  # starter config — copy to terraform.tfvars
 ```
-
----
-
-## Improvement roadmap
-
-Tracked in detail in the session plan; high level:
-
-```mermaid
-flowchart LR
-    A[Phase A<br/>Infrastructure hardening<br/>P1]
-    B[Phase B<br/>Deployment safety<br/>P1]
-    C[Phase C<br/>Docs and diagrams<br/>P1]
-    D[Phase D<br/>Kafka automation<br/>P2]
-    E[Phase E<br/>Databricks/storage<br/>P2]
-    F[Phase F<br/>Terraform cleanup<br/>P3]
-    G[Phase G<br/>Bootstrap alternatives<br/>P2]
-
-    A --> B --> C --> D --> E --> F --> G
-```
-
-| Phase | Focus | Priority | Status |
-| --- | --- | --- | --- |
-| A | NSG attached to Kafka NIC, HTTP restricted, SSH path expansion, sensitive outputs | P1 | ✅ Done |
-| B | Remove unused variables, clean descriptions, `terraform.tfvars.example` | P1 | ✅ Done |
-| C | Restructured README, architecture + roadmap diagrams, operator checklist | P1 | ✅ Done |
-| D | Automate Kafka/Zookeeper/systemd/firewall via cloud-init | P2 | ✅ Done (cloud-init) |
-| E | Storage network rules + HTTPS-only, Databricks `no_public_ip = true` | P2 | ✅ Done |
-| F | Upgrade to Terraform 1.14.9 + azurerm 4.70.0, switch VM to `azurerm_linux_virtual_machine`, add `min_tls_version = "TLS1_2"` on storage, fix naming typos (`databricksWokspace`, `DBWokspaceSingleNode`, `adlsFyleSytemID`), drop dead commented blocks | P3 | ✅ Done |
-| G | Add standalone shell script and Ansible playbook bootstrap alternatives with comparison docs | P2 | ✅ Done |
 
 ---
 

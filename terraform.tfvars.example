@@ -20,7 +20,7 @@ vmUserName = "kafkaAdmin"
 # Kafka VM image. RHEL 7-RAW-CI is deprecated/unavailable in some regions.
 vmImagePublisher = "RedHat"
 vmImageOffer     = "RHEL"
-vmImageSku       = "8_10"
+vmImageSku       = "9_7"
 vmImageVersion   = "latest"
 
 # Java runtime installed by cloud-init. Solace connector 3.3.0 requires Java 11

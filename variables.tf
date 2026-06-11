@@ -104,8 +104,8 @@ variable "vmImageOffer" {
 
 variable "vmImageSku" {
   type        = string
-  default     = "8_10"
-  description = "Azure Marketplace SKU for the Kafka VM image. RHEL 7-RAW-CI is deprecated/unavailable in some regions."
+  default     = "9_7"
+  description = "Azure Marketplace SKU for the Kafka VM image. RHEL 9_7 ships java-11-openjdk-devel (required by Solace connector 3.3.0). RHEL 10 drops OpenJDK 11, and 7-RAW-CI is deprecated/unavailable in some regions."
 }
 
 variable "vmImageVersion" {

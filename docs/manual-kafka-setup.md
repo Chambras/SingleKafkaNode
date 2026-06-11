@@ -5,7 +5,7 @@
 You can follow this guide on:
 
 - the VM created by `terraform apply` (just disable the automation first — temporarily remove the `custom_data` argument in `vm.tf`), or
-- any fresh RHEL 8 host that has `java-11-openjdk-devel`, `git`, and `wget` installed.
+- any fresh RHEL 9 host that has `java-11-openjdk-devel`, `git`, and `wget` installed.
 
 > Solace connector 3.3.0 is compiled for Java 11 (`class file version 55`), so Java 8 is not sufficient even though Kafka 2.3.0 can run on Java 8.
 
