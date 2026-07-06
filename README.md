@@ -128,8 +128,8 @@ This repo currently pins the infrastructure tooling but keeps the Kafka runtime 
 
 | Component | Version | Where configured | Notes |
 | --- | --- | --- | --- |
-| Terraform CLI | `>= 1.15.6` | `main.tf` | Developed and validated with Terraform `1.15.6`. |
-| AzureRM provider | `= 4.76.0` | `main.tf` | Pinned via `required_providers`. |
+| Terraform CLI | `>= 1.15.7` | `main.tf` | Developed and validated with Terraform `1.15.7`. |
+| AzureRM provider | `= 4.80.0` | `main.tf` | Pinned via `required_providers`. |
 | Azure CLI | `2.87.0` | Local prerequisite | Used for Azure auth (`az login`). Newer versions should work. |
 | VM image | Red Hat Enterprise Linux `9_7` | `variables.tf` (`vmImage*`) | Pulled as `latest` from the Azure marketplace. RHEL 9_7 ships `java-11-openjdk-devel`; RHEL 10 drops OpenJDK 11, and `7-RAW-CI` is deprecated/unavailable in some regions. |
 | Apache Kafka | `2.3.0` | `variables.tf` (`kafkaVersion`) | Requires ZooKeeper. KRaft mode is not available in this version. |
