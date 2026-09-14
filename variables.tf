@@ -60,7 +60,7 @@ variable "dataBricksSubnets" {
 ## Security variables
 variable "sourceIPs" {
   type        = list(string)
-  default     = ["74.96.174.80"]
+  default     = ["74.96.174.80", "4.204.64.239", "40.117.67.16", "20.110.218.7"]
   description = "Public IPs allowed to reach admin ports (SSH, HTTP) on the Kafka VM. MUST be overridden per environment."
 }
 
