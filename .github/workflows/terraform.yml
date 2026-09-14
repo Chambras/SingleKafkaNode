@@ -3,6 +3,9 @@ run-name: Terraform ${{ inputs.operation || 'apply' }} on ${{ github.ref_name }}
 
 on:
   push:
+    paths-ignore:
+      - ".devcontainer/**"
+      - '**/README.md'
     branches: [main]
   workflow_dispatch:
     inputs:
