@@ -25,6 +25,7 @@ Terraform that provisions a single-node Apache Kafka VM on Azure along with the 
 15. [Tear down](#tear-down)
 16. [Repository layout](#repository-layout)
 17. [Improvement roadmap](#improvement-roadmap)
+18. [GitHub Actions automation](#github-actions-automation)
 
 ---
 
@@ -108,7 +109,8 @@ flowchart TD
 
 ## Prerequisites
 
-- Azure CLI logged in to the target subscription (`az login`). A Service Principal with a certificate is recommended for automation.
+- Azure CLI logged in to the target subscription (`az login`) for local runs. GitHub Actions uses an Azure service principal with a client secret stored in GitHub Secrets.
+- An HCP Terraform workspace in **Local** execution mode for shared state. Follow [GitHub Actions setup](docs/github-actions.md) for authentication and migration of existing local state before the next deployment.
 - Terraform CLI and Azure provider versions listed in [Tool and runtime versions](#tool-and-runtime-versions).
 - An SSH key pair. To create one:
 
@@ -128,8 +130,8 @@ This repo currently pins the infrastructure tooling but keeps the Kafka runtime 
 
 | Component | Version | Where configured | Notes |
 | --- | --- | --- | --- |
-| Terraform CLI | `>= 1.15.7` | `main.tf` | Developed and validated with Terraform `1.15.7`. |
-| AzureRM provider | `= 4.80.0` | `main.tf` | Pinned via `required_providers`. |
+| Terraform CLI | `>= 1.16.2` | `main.tf` | GitHub Actions uses Terraform `1.16.2`. |
+| AzureRM provider | `= 4.81.0` | `main.tf` | Pinned via `required_providers`. |
 | Azure CLI | `2.87.0` | Local prerequisite | Used for Azure auth (`az login`). Newer versions should work. |
 | VM image | Red Hat Enterprise Linux `9_7` | `variables.tf` (`vmImage*`) | Pulled as `latest` from the Azure marketplace. RHEL 9_7 ships `java-11-openjdk-devel`; RHEL 10 drops OpenJDK 11, and `7-RAW-CI` is deprecated/unavailable in some regions. |
 | Apache Kafka | `2.3.0` | `variables.tf` (`kafkaVersion`) | Requires ZooKeeper. KRaft mode is not available in this version. |
@@ -170,6 +172,8 @@ $EDITOR terraform.tfvars
 From the repo root:
 
 ```bash
+terraform login
+unset TF_CLOUD_ORGANIZATION TF_WORKSPACE TF_CLOUD_PROJECT
 terraform fmt
 terraform init
 terraform validate
@@ -177,13 +181,23 @@ terraform plan -out tfplan
 terraform apply tfplan
 ```
 
-A remote backend is recommended rather than local state — see `main.tf`. A free Terraform Cloud account works: <https://app.terraform.io>.
+State is stored in HCP Terraform through the cloud block in [main.tf](main.tf), targeting organization **`chambras`**, project **`SWIM`**, and workspace **`SingleKafKaNode`**. The configuration supplies these values; clear old exports to avoid conflicting workspace selections. Ensure the workspace uses **Local** execution mode before initializing. If you already have local state, follow the [state migration instructions](docs/github-actions.md#5-migrate-existing-local-state-before-enabling-actions) before running a plan or enabling automation.
 
 Useful outputs after `apply`:
 
 - `kafkaPublicIP` — the VM's public IP (SSH target).
 - `storageAccountKey` — **sensitive**, use `terraform output -raw storageAccountKey`.
 - `databricksWorkspaceURL` — click-through to the workspace.
+
+---
+
+## GitHub Actions automation
+
+The [Terraform workflow](.github/workflows/terraform.yml) applies on pushes or merges to `main`, and offers manual `apply` and `destroy` operations. Destroy requires typing the HCP workspace name. Both operations use the same remote state and concurrency group.
+
+Authentication uses **Azure service-principal credentials** (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`) and an **HCP Terraform API token** (`TF_API_TOKEN`), all supplied through GitHub Secrets. No OIDC setup is required. Deployment inputs use the defaults in [variables.tf](variables.tf), with the SSH public key supplied through GitHub Variable `VM_SSH_PUBLIC_KEY`. Preserve any existing deployment overrides before switching to defaults. A runner with authorized storage-network access is required because the storage accounts default-deny traffic.
+
+Follow [GitHub Actions setup](docs/github-actions.md) to configure the identity, environment, runner, inputs, and state migration. The workflow remains disabled until the repository variable `TERRAFORM_AUTOMATION_ENABLED` is `true`.
 
 ---
 

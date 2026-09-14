@@ -1,0 +1,121 @@
+name: Terraform
+run-name: Terraform ${{ inputs.operation || 'apply' }} on ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Terraform operation
+        type: choice
+        options:
+          - apply
+          - destroy
+        default: apply
+        required: true
+      confirm_destroy:
+        description: For destroy, enter the exact HCP Terraform workspace name
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-single-kafka
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    if: github.ref == 'refs/heads/main' && vars.TERRAFORM_AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: terraform
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      TF_IN_AUTOMATION: ${{ vars.TF_IN_AUTOMATION }}
+      TF_INPUT: 'false'
+      TF_CLOUD_ORGANIZATION: chambras
+      TF_WORKSPACE: SingleKafKaNode
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+      ARM_USE_CLI: 'false'
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      OPERATION: ${{ inputs.operation || 'apply' }}
+    steps:
+      - name: Check configuration and destroy confirmation
+        env:
+          DESTROY_CONFIRMATION: ${{ inputs.confirm_destroy }}
+        run: |
+          for variable in TF_CLOUD_ORGANIZATION TF_WORKSPACE TF_TOKEN_app_terraform_io ARM_CLIENT_ID ARM_CLIENT_SECRET ARM_TENANT_ID ARM_SUBSCRIPTION_ID; do
+            if [[ -z "${!variable}" ]]; then
+              echo "::error::Missing required configuration: $variable"
+              exit 1
+            fi
+          done
+          case "$OPERATION" in
+            apply) ;;
+            destroy)
+              if [[ "$GITHUB_EVENT_NAME" != 'workflow_dispatch' || "$DESTROY_CONFIRMATION" != "$TF_WORKSPACE" ]]; then
+                echo '::error::Destroy requires a manual run and an exact workspace-name confirmation.'
+                exit 1
+              fi
+              ;;
+            *)
+              echo '::error::Unsupported Terraform operation.'
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.16.2'
+          terraform_wrapper: false
+
+      - name: Prepare SSH public key
+        env:
+          VM_SSH_PUBLIC_KEY: ${{ vars.VM_SSH_PUBLIC_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$VM_SSH_PUBLIC_KEY" > "$RUNNER_TEMP/single-kafka-ssh.pub"
+          ssh-keygen -l -f "$RUNNER_TEMP/single-kafka-ssh.pub" > /dev/null
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialize
+        run: terraform init -input=false -lockfile=readonly -no-color
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        run: |
+          plan_args=()
+          if [[ "$OPERATION" == 'destroy' ]]; then
+            plan_args+=(-destroy)
+          fi
+          terraform plan -input=false -no-color -lock-timeout=5m \
+            -var="sshKeyPath=$RUNNER_TEMP/single-kafka-ssh.pub" \
+            -out="$RUNNER_TEMP/single-kafka.tfplan" "${plan_args[@]}"
+
+      - name: Apply saved plan
+        run: terraform apply -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/single-kafka.tfplan"
+
+      - name: Remove temporary SSH public key and plan
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/single-kafka-ssh.pub" \
+            "$RUNNER_TEMP/single-kafka.tfplan"

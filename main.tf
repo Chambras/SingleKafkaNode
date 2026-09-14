@@ -1,14 +1,13 @@
 terraform {
-  # It is recommended to use remote state instead of local
-  # You can update these values in order to configure your remote state.
-  /*  backend "remote" {
-    organization = "{{ORGANIZATION_NAME}}"
+  cloud {
+    organization = "chambras"
 
     workspaces {
-      name = "{{WORKSPACE_NAME}}"
+      name    = "SingleKafKaNode"
+      project = "SWIM"
     }
   }
-*/
+
   required_version = ">= 1.16.2"
 
   required_providers {
