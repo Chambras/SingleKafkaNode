@@ -64,9 +64,17 @@ Under the **`terraform` environment**, add:
 | Secret | `ARM_CLIENT_SECRET` | Entra client secret Value, not Secret ID |
 | Secret | `ARM_TENANT_ID` | Entra directory/tenant ID |
 | Secret | `ARM_SUBSCRIPTION_ID` | Target Azure subscription ID |
-| Variable | `VM_SSH_PUBLIC_KEY` | Contents of the existing VM SSH **public** key, not a path or private key |
+| Secret | `VM_SSH_PUBLIC_KEY` | Contents of the existing VM SSH **public** key, not a path or private key |
 
 Repository-level Secrets with these names also work, as in HashiTalks2026; environment-level Secrets with the same names take precedence. The workflow still references the `terraform` environment. Secrets in another repository are not automatically available here. The old `AZURE_*` Variables are no longer used.
+
+Set the public-key secret from your local public-key file:
+
+```bash
+gh secret set VM_SSH_PUBLIC_KEY --env terraform --repo Chambras/SingleKafkaNode < ~/.ssh/vm_ssh.pub
+```
+
+Environment scope works here because the step runs inside the `terraform` environment. The workflow reads `secrets.VM_SSH_PUBLIC_KEY`, not `vars.VM_SSH_PUBLIC_KEY`; GitHub Secrets and Variables are separate settings. A public key is not confidential, but storing it as a Secret is supported. Do not use the private-key file without the `.pub` suffix.
 
 The workflow uses the defaults in [variables.tf](../variables.tf), except for `sshKeyPath`: it writes `VM_SSH_PUBLIC_KEY` to a temporary file and passes that path on the command line. The public key is still required, including for destroy. Never upload the VM's private SSH key to this workflow. `TFVARS_JSON` is no longer used and can be removed from GitHub Variables.
 

@@ -195,7 +195,7 @@ Useful outputs after `apply`:
 
 The [Terraform workflow](.github/workflows/terraform.yml) applies on pushes or merges to `main`, and offers manual `apply` and `destroy` operations. Destroy requires typing the HCP workspace name. Both operations use the same remote state and concurrency group.
 
-Authentication uses **Azure service-principal credentials** (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`) and an **HCP Terraform API token** (`TF_API_TOKEN`), all supplied through GitHub Secrets. No OIDC setup is required. Deployment inputs use the defaults in [variables.tf](variables.tf), with the SSH public key supplied through GitHub Variable `VM_SSH_PUBLIC_KEY`. Preserve any existing deployment overrides before switching to defaults. A runner with authorized storage-network access is required because the storage accounts default-deny traffic.
+Authentication uses **Azure service-principal credentials** (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`) and an **HCP Terraform API token** (`TF_API_TOKEN`), all supplied through GitHub Secrets. No OIDC setup is required. Deployment inputs use the defaults in [variables.tf](variables.tf), with the SSH public key supplied through GitHub Secret `VM_SSH_PUBLIC_KEY`. Preserve any existing deployment overrides before switching to defaults. A runner with authorized storage-network access is required because the storage accounts default-deny traffic.
 
 Follow [GitHub Actions setup](docs/github-actions.md) to configure the identity, environment, runner, inputs, and state migration. The workflow remains disabled until the repository variable `TERRAFORM_AUTOMATION_ENABLED` is `true`.
 

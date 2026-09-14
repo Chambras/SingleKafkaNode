@@ -86,7 +86,7 @@ jobs:
 
       - name: Prepare SSH public key
         env:
-          VM_SSH_PUBLIC_KEY: ${{ vars.VM_SSH_PUBLIC_KEY }}
+          VM_SSH_PUBLIC_KEY: ${{ secrets.VM_SSH_PUBLIC_KEY }}
         run: |
           umask 077
           printf '%s\n' "$VM_SSH_PUBLIC_KEY" > "$RUNNER_TEMP/single-kafka-ssh.pub"
