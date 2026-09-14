@@ -195,7 +195,7 @@ Useful outputs after `apply`:
 
 The [Terraform workflow](.github/workflows/terraform.yml) applies on pushes or merges to `main`, and offers manual `apply` and `destroy` operations. Destroy requires typing the HCP workspace name. Both operations use the same remote state and concurrency group.
 
-Authentication uses **Azure service-principal credentials** (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`) and an **HCP Terraform API token** (`TF_API_TOKEN`), all supplied through GitHub Secrets. No OIDC setup is required. Deployment inputs use the defaults in [variables.tf](variables.tf), with the SSH public key supplied through GitHub Secret `VM_SSH_PUBLIC_KEY`. Preserve any existing deployment overrides before switching to defaults. A runner with authorized storage-network access is required because the storage accounts default-deny traffic.
+Authentication uses **Azure service-principal credentials** (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`) and an **HCP Terraform API token** (`TF_API_TOKEN`), all supplied through GitHub Secrets. No OIDC setup is required. Deployment inputs use the defaults in [variables.tf](variables.tf), with the SSH public key supplied through GitHub Secret `VM_SSH_PUBLIC_KEY`. Preserve any existing deployment overrides before switching to defaults. For this initial development test, both storage accounts allow authenticated access from all networks so `ubuntu-latest` runners can reach them; anonymous blob access remains disabled. Restore network restrictions or destroy the stack after the test.
 
 Follow [GitHub Actions setup](docs/github-actions.md) to configure the identity, environment, runner, inputs, and state migration. The workflow remains disabled until the repository variable `TERRAFORM_AUTOMATION_ENABLED` is `true`.
 
@@ -208,7 +208,8 @@ Run through this list before handing the environment to anyone:
 - [ ] `sourceIPs` contains **only** the IPs that should have SSH/HTTP access.
 - [ ] You can `ssh kafkaAdmin@<kafkaPublicIP> -i <path-to-private-key>`.
 - [ ] Storage account key is **not** pasted into shared channels (`terraform output storageAccountKey` is marked sensitive).
-- [ ] Databricks workspace opens and can mount the `data` container and `tfms` filesystem. (Storage accounts now default-deny: only `sourceIPs`, the Kafka subnet, and the Databricks subnets are allowed.)
+- [ ] Databricks workspace opens and can mount the `data` container and `tfms` filesystem using authorized credentials.
+- [ ] After the initial test, restore storage network restrictions from an authorized network path or destroy the stack. The all-network test setting does not expire automatically.
 - [ ] Tag/label the resource group with an owner and expiration if your subscription enforces it.
 - [ ] Destroy the environment when you are done (see [Tear down](#tear-down)).
 

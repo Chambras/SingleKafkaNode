@@ -6,11 +6,13 @@ resource "azurerm_storage_account" "genericSA" {
   account_tier             = "Standard"
   account_replication_type = "GRS"
 
-  https_traffic_only_enabled = true
-  min_tls_version            = "TLS1_2"
+  https_traffic_only_enabled      = true
+  min_tls_version                 = "TLS1_2"
+  public_network_access_enabled   = true
+  allow_nested_items_to_be_public = false
 
   network_rules {
-    default_action = "Deny"
+    default_action = "Allow"
     bypass         = ["AzureServices"]
     ip_rules       = var.sourceIPs
     virtual_network_subnet_ids = [
@@ -38,11 +40,13 @@ resource "azurerm_storage_account" "ADLS" {
   account_kind             = "StorageV2"
   is_hns_enabled           = true
 
-  https_traffic_only_enabled = true
-  min_tls_version            = "TLS1_2"
+  https_traffic_only_enabled      = true
+  min_tls_version                 = "TLS1_2"
+  public_network_access_enabled   = true
+  allow_nested_items_to_be_public = false
 
   network_rules {
-    default_action = "Deny"
+    default_action = "Allow"
     bypass         = ["AzureServices"]
     ip_rules       = var.sourceIPs
     virtual_network_subnet_ids = [
