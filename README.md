@@ -1,3 +1,5 @@
+[![Terraform](https://github.com/Chambras/SingleKafkaNode/actions/workflows/terraform.yml/badge.svg)](https://github.com/Chambras/SingleKafkaNode/actions/workflows/terraform.yml)
+
 # Single Kafka Node on Azure
 
 Terraform that provisions a single-node Apache Kafka VM on Azure along with the networking, storage, and Azure Databricks workspace needed to ingest messages from a Solace PubSub+ broker and land data for analytics.
